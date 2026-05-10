@@ -1,110 +1,100 @@
 #include <jni.h>
 #include <string>
-#include <algorithm>
-#include <climits>
+#include <cstring>
+#include <cstdio>
 #include <android/log.h>
+#include <sys/ptrace.h>
 
-#define TAG "JNI_LAB"
+#define TAG "LAB23_SECURITY"
+
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// Message natif
+static bool checkTracerState() {
+    long result = ptrace(PTRACE_TRACEME, 0, 0, 0);
+
+    if (result == -1) {
+        LOGE("Controle natif : debug detecte");
+        return true;
+    }
+
+    LOGI("Controle natif : aucun debug detecte");
+    return false;
+}
+
+static bool scanMemoryMaps() {
+    FILE *file = fopen("/proc/self/maps", "r");
+
+    if (file == nullptr) {
+        LOGW("Impossible de lire /proc/self/maps");
+        return false;
+    }
+
+    char line[512];
+
+    while (fgets(line, sizeof(line), file)) {
+        if (strstr(line, "frida") ||
+            strstr(line, "xposed") ||
+            strstr(line, "magisk") ||
+            strstr(line, "gdb") ||
+            strstr(line, "substrate")) {
+
+            LOGE("Element suspect trouve : %s", line);
+            fclose(file);
+            return true;
+        }
+    }
+
+    fclose(file);
+    LOGI("Aucune librairie suspecte detectee");
+
+    return false;
+}
+
 extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_example_jnidemo_MainActivity_getNativeMessage(
+JNIEXPORT jboolean JNICALL
+Java_com_example_jnidemo_MainActivity_checkNativeSecurity(
         JNIEnv *env,
         jobject thiz) {
 
-    LOGI("Message envoye depuis C++");
+    bool debugDetected = checkTracerState();
+    bool suspiciousLib = scanMemoryMaps();
 
-    return env->NewStringUTF(
-            "Bienvenue dans le laboratoire JNI Android");
+    if (debugDetected || suspiciousLib) {
+        LOGE("Etat global : environnement suspect");
+        return JNI_TRUE;
+    }
+
+    LOGI("Etat global : environnement normal");
+    return JNI_FALSE;
 }
 
-// Factoriel
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_jnidemo_MainActivity_getSecureMessage(
+        JNIEnv *env,
+        jobject thiz) {
+
+    return env->NewStringUTF("JNI sécurisé : Java communique avec C++");
+}
+
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_example_jnidemo_MainActivity_calculateFactorial(
+Java_com_example_jnidemo_MainActivity_secureFactorial(
         JNIEnv *env,
         jobject thiz,
         jint number) {
 
     if (number < 0) {
-        LOGE("Nombre negatif");
         return -1;
     }
 
     long long result = 1;
 
     for (int i = 1; i <= number; i++) {
-
         result *= i;
-
-        if (result > INT_MAX) {
-            LOGE("Overflow detecte");
-            return -2;
-        }
     }
-
-    LOGI("Factoriel calcule");
 
     return static_cast<jint>(result);
-}
-
-// Inversion texte
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_example_jnidemo_MainActivity_mirrorText(
-        JNIEnv *env,
-        jobject thiz,
-        jstring text) {
-
-    if (text == nullptr) {
-        return env->NewStringUTF("Texte invalide");
-    }
-
-    const char *chars =
-            env->GetStringUTFChars(text, nullptr);
-
-    std::string nativeText(chars);
-
-    env->ReleaseStringUTFChars(text, chars);
-
-    std::reverse(
-            nativeText.begin(),
-            nativeText.end());
-
-    return env->NewStringUTF(nativeText.c_str());
-}
-
-// Somme tableau
-extern "C"
-JNIEXPORT jint JNICALL
-Java_com_example_jnidemo_MainActivity_calculateArrayTotal(
-        JNIEnv *env,
-        jobject thiz,
-        jintArray values) {
-
-    if (values == nullptr) {
-        return -1;
-    }
-
-    jsize size =
-            env->GetArrayLength(values);
-
-    jint *elements =
-            env->GetIntArrayElements(values, nullptr);
-
-    long long total = 0;
-
-    for (int i = 0; i < size; i++) {
-        total += elements[i];
-    }
-
-    env->ReleaseIntArrayElements(
-            values,
-            elements,
-            0);
-
-    return static_cast<jint>(total);
 }
